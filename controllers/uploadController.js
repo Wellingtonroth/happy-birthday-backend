@@ -2,41 +2,93 @@ const supabase = require("../supabaseClient");
 const multer = require("multer");
 
 const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+const upload = multer({ storage });
 
-exports.uploadMiddleware = upload.single("image");
+exports.uploadMiddleware = upload.array("images", 3);
 
-exports.uploadImage = async (req, res) => {
+exports.uploadImages = async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No image uploaded" });
+    console.log("🔥 Iniciando upload de imagens...");
+    console.log("📩 Request body:", JSON.stringify(req.body, null, 2));
+    console.log(
+      "📷 Arquivos recebidos:",
+      req.files?.map((f) => f.originalname)
+    );
+
+    const { orderId } = req.body;
+    const files = req.files;
+
+    if (!orderId) {
+      return res.status(400).json({ error: "❌ Missing orderId" });
     }
 
-    const { buffer, originalname, mimetype } = req.file;
-    const filePath = `user-uploads/${Date.now()}-${originalname}`;
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("plan")
+      .eq("id", orderId)
+      .single();
 
-    // Upload to Supabase Storage
-    const { error } = await supabase.storage
-      .from("images")
-      .upload(filePath, buffer, {
-        contentType: mimetype,
-        cacheControl: "3600",
-        upsert: false,
-      });
-
-    if (error) {
-      return res.status(500).json({ error: "Failed to upload image to Supabase" });
+    if (orderError || !order) {
+      console.error("❌ Erro ao buscar o pedido:", orderError);
+      return res.status(404).json({ error: "Order not found" });
     }
 
-    const publicUrlResponse = supabase.storage.from("images").getPublicUrl(filePath);
-    const publicUrl = publicUrlResponse.data.publicUrl;
-
-    if (!publicUrl) {
-      return res.status(500).json({ error: "Failed to retrieve public image URL" });
+    if (order.plan !== "premium") {
+      return res
+        .status(403)
+        .json({ error: "❌ Image uploads allowed only for premium plans" });
     }
 
-    return res.json({ imageUrl: publicUrl });
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: "❌ No images provided" });
+    }
+
+    const imageUrls = [];
+
+    for (const file of files) {
+      console.log("📂 Uploading file:", file.originalname);
+
+      const { buffer, originalname, mimetype } = file;
+      const filePath = `orders/${orderId}/${Date.now()}-${originalname}`;
+
+      const { data, error } = await supabase.storage
+        .from("images")
+        .upload(filePath, buffer, { contentType: mimetype });
+
+      console.log("📂 Arquivo enviado:", data);
+
+      if (error) {
+        console.error("❌ Upload error:", error);
+        return res.status(500).json({ error: "Failed to upload images" });
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from("images")
+        .getPublicUrl(filePath);
+      const publicUrl = publicUrlData.publicUrl;
+
+      if (publicUrl) {
+        imageUrls.push(publicUrl);
+      }
+    }
+
+    const imageRecords = imageUrls.map((url) => ({
+      order_id: orderId,
+      image_url: url,
+    }));
+
+    const { error: dbError } = await supabase
+      .from("order_images")
+      .insert(imageRecords);
+
+    if (dbError) {
+      console.error("❌ Database error:", dbError);
+      return res.status(500).json({ error: "Failed to save image records" });
+    }
+
+    return res.json({ success: true, imageUrls });
   } catch (error) {
-    return res.status(500).json({ error: "Failed to upload image" });
+    console.error("❌ Internal error uploading images:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
