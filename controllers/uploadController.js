@@ -4,7 +4,7 @@ const multer = require("multer");
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-exports.uploadMiddleware = upload.array("images", 3);
+exports.uploadMiddleware = upload.array("images", 4);
 
 exports.uploadImages = async (req, res) => {
   try {
