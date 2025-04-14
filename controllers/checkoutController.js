@@ -18,7 +18,15 @@ exports.handleCheckout = async (req, res) => {
 
     const { data: orderData, error: orderError } = await supabase
       .from("orders")
-      .insert([{ name, age, email, message, plan, theme, status: "pending" }])
+      .insert([{ 
+        name, 
+        age, 
+        email,
+        message, 
+        plan, 
+        theme, 
+        status: "pending",
+      }])
       .select("id")
       .single();
 
